@@ -1,5 +1,5 @@
 [package]
-name = "memblocks"
+name = "bitcoin-chain"
 version = "0.1.0"
 authors = ["Andrew Poelstra <apoelstra@wpsoftware.net>"]
 license = "CC0-1.0"
@@ -10,7 +10,7 @@ keywords = [ "crypto", "bitcoin" ]
 readme = "README.md"
 
 [lib]
-name = "memblocks"
+name = "bitcoin_chain"
 path = "src/lib.rs"
 
 [dependencies]
