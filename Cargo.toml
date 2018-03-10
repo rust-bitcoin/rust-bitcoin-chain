@@ -17,4 +17,4 @@ path = "src/lib.rs"
 bitcoin = "0.11.0"
 
 [patch.crates-io]
-bitcoin = { git = "https://github.com/tamasblummer/rust-bitcoin", branch = "memblocks"  }
+bitcoin = { git = "https://github.com/rust-bitcoin/rust-bitcoin", branch = "master"  }
