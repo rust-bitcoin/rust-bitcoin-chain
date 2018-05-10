@@ -14,6 +14,6 @@ name = "bitcoin_chain"
 path = "src/lib.rs"
 
 [dependencies]
-bitcoin = "0.12"
+bitcoin = "0.13"
 
 [patch.crates-io]
