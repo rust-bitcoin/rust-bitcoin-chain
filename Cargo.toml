@@ -15,5 +15,3 @@ path = "src/lib.rs"
 
 [dependencies]
 bitcoin = "0.13"
-
-[patch.crates-io]
