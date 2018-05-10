@@ -1,4 +1,4 @@
 extern crate bitcoin;
 
 pub mod blockchain;
-mod patricia_tree;
+pub mod patricia_tree;
