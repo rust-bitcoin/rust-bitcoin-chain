@@ -56,6 +56,8 @@ pub struct BlockchainNode {
     next: NodePtr
 }
 
+unsafe impl Send for BlockchainNode {}
+
 impl BlockchainNode {
     /// Is the node on the main chain?
     pub fn is_on_main_chain(&self, chain: &Blockchain) -> bool {
@@ -118,6 +120,8 @@ pub struct Blockchain {
     best_hash: Sha256dHash,
     genesis_hash: Sha256dHash
 }
+
+unsafe impl Send for Blockchain {}
 
 impl<S: SimpleEncoder> ConsensusEncodable<S> for Blockchain {
     #[inline]
