@@ -27,6 +27,7 @@ use std::{cmp, fmt, ops, ptr};
 use bitcoin::network::encodable::{ConsensusDecodable, ConsensusEncodable};
 use bitcoin::network::serialize::{SimpleDecoder, SimpleEncoder};
 use bitcoin::util::BitArray;
+use bitcoin::network::serialize;
 
 /// Patricia troo
 pub struct PatriciaTree<K: Copy, V> {
@@ -400,7 +401,7 @@ impl<S, K, V> ConsensusEncodable<S> for PatriciaTree<K, V>
           K: Copy + ConsensusEncodable<S>,
           V: ConsensusEncodable<S>
 {
-    fn consensus_encode(&self, s: &mut S) -> Result<(), S::Error> {
+    fn consensus_encode(&self, s: &mut S) -> Result<(), serialize::Error> {
         // Depth-first serialization: serialize self, then children
         try!(self.skip_prefix.consensus_encode(s));
         try!(self.skip_len.consensus_encode(s));
@@ -416,7 +417,7 @@ impl<D, K, V> ConsensusDecodable<D> for PatriciaTree<K, V>
           K: Copy + ConsensusDecodable<D>,
           V: ConsensusDecodable<D>
 {
-    fn consensus_decode(d: &mut D) -> Result<PatriciaTree<K, V>, D::Error> {
+    fn consensus_decode(d: &mut D) -> Result<PatriciaTree<K, V>, serialize::Error> {
         Ok(PatriciaTree {
             skip_prefix: try!(ConsensusDecodable::consensus_decode(d)),
             skip_len: try!(ConsensusDecodable::consensus_decode(d)),
