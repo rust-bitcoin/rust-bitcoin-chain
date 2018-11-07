@@ -44,8 +44,7 @@ pub enum Error {
     BlockNotFound,
     DuplicateHash,
     PrevHashNotFound,
-    BitcoinError(bitcoin::Error),
-    TreeError(String)
+    BitcoinError(bitcoin::Error)
 }
 
 impl From<bitcoin::Error> for Error {
