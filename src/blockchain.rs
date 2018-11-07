@@ -20,6 +20,8 @@
 
 use std::{marker, ptr};
 use std::convert::From;
+use std::error::Error;
+use std::fmt;
 
 use bitcoin::blockdata::block::{Block, BlockHeader};
 use bitcoin::blockdata::transaction::Transaction;
@@ -40,16 +42,36 @@ use patricia_tree::PatriciaTree;
 type BlockTree = PatriciaTree<Uint256, Box<BlockchainNode>>;
 type NodePtr = *const BlockchainNode;
 
-pub enum Error {
+pub enum BlockchainError {
     BlockNotFound,
     DuplicateHash,
     PrevHashNotFound,
     BitcoinError(bitcoin::Error)
 }
 
-impl From<bitcoin::Error> for Error {
+impl From<bitcoin::Error> for BlockchainError {
     fn from(e: bitcoin::Error) -> Self {
-        Error::BitcoinError(e)
+        BlockchainError::BitcoinError(e)
+    }
+}
+
+impl Error for BlockchainError {
+}
+
+impl fmt::Display for BlockchainError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            BlockchainError::BlockNotFound => write!(f, "Block not found"),
+            BlockchainError::DuplicateHash => write!(f, "Duplicate hash"),
+            BlockchainError::PrevHashNotFound => write!(f, "previous hash not found"),
+            BlockchainError::BitcoinError(ref err) => write!(f, "Serialize error: {}", err),
+        }
+    }
+}
+
+impl fmt::Debug for BlockchainError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        (self as &fmt::Display).fmt(f)
     }
 }
 
@@ -392,14 +414,14 @@ impl Blockchain {
         }
     }
 
-    fn replace_txdata(&mut self, hash: &Uint256, txdata: Vec<Transaction>, has_txdata: bool) -> Result<(), Error> {
+    fn replace_txdata(&mut self, hash: &Uint256, txdata: Vec<Transaction>, has_txdata: bool) -> Result<(), BlockchainError> {
         match self.tree.lookup_mut(hash, 256) {
             Some(existing_block) => {
                 existing_block.block.txdata.clone_from(&txdata);
                 existing_block.has_txdata = has_txdata;
                 Ok(())
             },
-            None => Err(Error::BlockNotFound)
+            None => Err(BlockchainError::BlockNotFound)
         }
     }
 
@@ -409,26 +431,26 @@ impl Blockchain {
     }
 
     /// Locates a block in the chain and overwrites its txdata
-    pub fn add_txdata(&mut self, block: Block) -> Result<(), Error> {
+    pub fn add_txdata(&mut self, block: Block) -> Result<(), BlockchainError> {
         self.replace_txdata(&block.header.bitcoin_hash().into_le(), block.txdata, true)
     }
 
     /// Locates a block in the chain and removes its txdata
-    pub fn remove_txdata(&mut self, hash: Sha256dHash) -> Result<(), Error> {
+    pub fn remove_txdata(&mut self, hash: Sha256dHash) -> Result<(), BlockchainError> {
         self.replace_txdata(&hash.into_le(), vec![], false)
     }
 
     /// Adds a block header to the chain
-    pub fn add_header(&mut self, header: BlockHeader) -> Result<(), Error> {
+    pub fn add_header(&mut self, header: BlockHeader) -> Result<(), BlockchainError> {
         self.real_add_block(Block { header: header, txdata: vec![] }, false)
     }
 
     /// Adds a block to the chain
-    pub fn add_block(&mut self, block: Block) -> Result<(), Error> {
+    pub fn add_block(&mut self, block: Block) -> Result<(), BlockchainError> {
         self.real_add_block(block, true)
     }
 
-    fn real_add_block(&mut self, block: Block, has_txdata: bool) -> Result<(), Error> {
+    fn real_add_block(&mut self, block: Block, has_txdata: bool) -> Result<(), BlockchainError> {
         // get_prev optimizes the common case where we are extending the best tip
         #[inline]
         fn get_prev(chain: &Blockchain, hash: Sha256dHash) -> Option<NodePtr> {
@@ -442,7 +464,7 @@ impl Blockchain {
         // handle locator hashes properly and may return blocks multiple times,
         // and this may also happen in case of a reorg.
         if self.tree.lookup(&block.header.bitcoin_hash().into_le(), 256).is_some() {
-            return Err(Error::DuplicateHash);
+            return Err(BlockchainError::DuplicateHash);
         }
         // Construct node, if possible
         let new_block = match get_prev(self, block.header.prev_blockhash) {
@@ -511,7 +533,7 @@ impl Blockchain {
                 ret
             },
             None => {
-                return Err(Error::PrevHashNotFound);
+                return Err(BlockchainError::PrevHashNotFound);
             }
         };
 
