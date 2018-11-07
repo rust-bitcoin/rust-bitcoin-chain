@@ -19,6 +19,7 @@
 //!
 
 use std::{marker, ptr};
+use std::convert::From;
 
 use bitcoin::blockdata::block::{Block, BlockHeader};
 use bitcoin::blockdata::transaction::Transaction;
@@ -26,16 +27,32 @@ use bitcoin::blockdata::constants::{DIFFCHANGE_INTERVAL, DIFFCHANGE_TIMESPAN,
                                                      TARGET_BLOCK_SPACING, max_target, genesis_block};
 use bitcoin::network::constants::Network;
 use bitcoin::network::encodable::{ConsensusDecodable, ConsensusEncodable};
-use bitcoin::network::serialize::{BitcoinHash, SimpleDecoder, SimpleEncoder};
+use bitcoin::network::serialize::BitcoinHash;
 use bitcoin::util::BitArray;
-use bitcoin::util;
-use bitcoin::util::Error::{BlockNotFound, DuplicateHash, PrevHashNotFound};
 use bitcoin::util::uint::Uint256;
 use bitcoin::util::hash::Sha256dHash;
+use bitcoin::network::serialize::{SimpleDecoder,SimpleEncoder};
+use bitcoin::network::serialize;
+use bitcoin;
 use patricia_tree::PatriciaTree;
+
 
 type BlockTree = PatriciaTree<Uint256, Box<BlockchainNode>>;
 type NodePtr = *const BlockchainNode;
+
+pub enum Error {
+    BlockNotFound,
+    DuplicateHash,
+    PrevHashNotFound,
+    BitcoinError(bitcoin::Error),
+    TreeError(String)
+}
+
+impl From<bitcoin::Error> for Error {
+    fn from(e: bitcoin::Error) -> Self {
+        Error::BitcoinError(e)
+    }
+}
 
 /// A link in the blockchain
 pub struct BlockchainNode {
@@ -80,7 +97,7 @@ impl BlockchainNode {
 
 impl<S: SimpleEncoder> ConsensusEncodable<S> for BlockchainNode {
     #[inline]
-    fn consensus_encode(&self, s: &mut S) -> Result<(), S::Error> {
+    fn consensus_encode(&self, s: &mut S) -> Result<(), serialize::Error> where S: SimpleEncoder {
         try!(self.block.consensus_encode(s));
         try!(self.total_work.consensus_encode(s));
         try!(self.required_difficulty.consensus_encode(s));
@@ -93,7 +110,7 @@ impl<S: SimpleEncoder> ConsensusEncodable<S> for BlockchainNode {
 
 impl<D: SimpleDecoder> ConsensusDecodable<D> for BlockchainNode {
     #[inline]
-    fn consensus_decode(d: &mut D) -> Result<BlockchainNode, D::Error> {
+    fn consensus_decode(d: &mut D) -> Result<BlockchainNode, serialize::Error> where D: SimpleDecoder {
         Ok(BlockchainNode {
             block: try!(ConsensusDecodable::consensus_decode(d)),
             total_work: try!(ConsensusDecodable::consensus_decode(d)),
@@ -125,7 +142,7 @@ unsafe impl Send for Blockchain {}
 
 impl<S: SimpleEncoder> ConsensusEncodable<S> for Blockchain {
     #[inline]
-    fn consensus_encode(&self, s: &mut S) -> Result<(), S::Error> {
+    fn consensus_encode(&self, s: &mut S) -> Result<(), serialize::Error> {
         try!(self.network.consensus_encode(s));
         try!(self.tree.consensus_encode(s));
         try!(self.best_hash.consensus_encode(s));
@@ -135,7 +152,7 @@ impl<S: SimpleEncoder> ConsensusEncodable<S> for Blockchain {
 }
 
 impl<D: SimpleDecoder> ConsensusDecodable<D> for Blockchain {
-    fn consensus_decode(d: &mut D) -> Result<Blockchain, D::Error> {
+    fn consensus_decode(d: &mut D) -> Result<Blockchain, serialize::Error> {
         let network: Network = try!(ConsensusDecodable::consensus_decode(d));
         let mut tree: BlockTree = try!(ConsensusDecodable::consensus_decode(d));
         let best_hash: Sha256dHash = try!(ConsensusDecodable::consensus_decode(d));
@@ -145,12 +162,14 @@ impl<D: SimpleDecoder> ConsensusDecodable<D> for Blockchain {
         let best = match tree.lookup(&best_hash.into_le(), 256) {
             Some(node) => &**node as NodePtr,
             None => {
-                return Err(d.error(format!("best tip {:x} not in tree", best_hash)));
+                // TODO: this is a dirty hack to compile. This entire project will be decomissioned soon
+                return Err(serialize::Error::UnrecognizedNetworkCommand(format!("best tip {:x} not in tree", best_hash)));
             }
         };
         // Lookup genesis
         if tree.lookup(&genesis_hash.into_le(), 256).is_none() {
-            return Err(d.error(format!("genesis {:x} not in tree", genesis_hash)));
+            // TODO: this is a dirty hack to compile. This entire project will be decomissioned soon
+            return Err(serialize::Error::UnrecognizedNetworkCommand(format!("genesis {:x} not in tree", genesis_hash)));
         }
         // Reconnect all prev pointers
         let raw_tree = &tree as *const BlockTree;
@@ -174,8 +193,9 @@ impl<D: SimpleDecoder> ConsensusDecodable<D> for Blockchain {
 
             // Check that "genesis" is the genesis
             if (*scan).bitcoin_hash() != genesis_hash {
-                return Err(d.error(format!("no path from tip {:x} to genesis {:x}",
-                                                                     best_hash, genesis_hash)));
+                // TODO: this is a dirty hack to compile. This entire project will be decomissioned soon
+                return Err(serialize::Error::UnrecognizedNetworkCommand(format!("no path from tip {:x} to genesis {:x}",
+                                                                                best_hash, genesis_hash)));
             }
         }
 
@@ -373,14 +393,14 @@ impl Blockchain {
         }
     }
 
-    fn replace_txdata(&mut self, hash: &Uint256, txdata: Vec<Transaction>, has_txdata: bool) -> Result<(), util::Error> {
+    fn replace_txdata(&mut self, hash: &Uint256, txdata: Vec<Transaction>, has_txdata: bool) -> Result<(), Error> {
         match self.tree.lookup_mut(hash, 256) {
             Some(existing_block) => {
                 existing_block.block.txdata.clone_from(&txdata);
                 existing_block.has_txdata = has_txdata;
                 Ok(())
             },
-            None => Err(BlockNotFound)
+            None => Err(Error::BlockNotFound)
         }
     }
 
@@ -390,26 +410,26 @@ impl Blockchain {
     }
 
     /// Locates a block in the chain and overwrites its txdata
-    pub fn add_txdata(&mut self, block: Block) -> Result<(), util::Error> {
+    pub fn add_txdata(&mut self, block: Block) -> Result<(), Error> {
         self.replace_txdata(&block.header.bitcoin_hash().into_le(), block.txdata, true)
     }
 
     /// Locates a block in the chain and removes its txdata
-    pub fn remove_txdata(&mut self, hash: Sha256dHash) -> Result<(), util::Error> {
+    pub fn remove_txdata(&mut self, hash: Sha256dHash) -> Result<(), Error> {
         self.replace_txdata(&hash.into_le(), vec![], false)
     }
 
     /// Adds a block header to the chain
-    pub fn add_header(&mut self, header: BlockHeader) -> Result<(), util::Error> {
+    pub fn add_header(&mut self, header: BlockHeader) -> Result<(), Error> {
         self.real_add_block(Block { header: header, txdata: vec![] }, false)
     }
 
     /// Adds a block to the chain
-    pub fn add_block(&mut self, block: Block) -> Result<(), util::Error> {
+    pub fn add_block(&mut self, block: Block) -> Result<(), Error> {
         self.real_add_block(block, true)
     }
 
-    fn real_add_block(&mut self, block: Block, has_txdata: bool) -> Result<(), util::Error> {
+    fn real_add_block(&mut self, block: Block, has_txdata: bool) -> Result<(), Error> {
         // get_prev optimizes the common case where we are extending the best tip
         #[inline]
         fn get_prev(chain: &Blockchain, hash: Sha256dHash) -> Option<NodePtr> {
@@ -423,7 +443,7 @@ impl Blockchain {
         // handle locator hashes properly and may return blocks multiple times,
         // and this may also happen in case of a reorg.
         if self.tree.lookup(&block.header.bitcoin_hash().into_le(), 256).is_some() {
-            return Err(DuplicateHash);
+            return Err(Error::DuplicateHash);
         }
         // Construct node, if possible
         let new_block = match get_prev(self, block.header.prev_blockhash) {
@@ -492,7 +512,7 @@ impl Blockchain {
                 ret
             },
             None => {
-                return Err(PrevHashNotFound);
+                return Err(Error::PrevHashNotFound);
             }
         };
 
