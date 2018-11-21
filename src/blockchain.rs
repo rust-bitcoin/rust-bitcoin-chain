@@ -28,15 +28,14 @@ use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::blockdata::constants::{DIFFCHANGE_INTERVAL, DIFFCHANGE_TIMESPAN,
                                                      TARGET_BLOCK_SPACING, max_target, genesis_block};
 use bitcoin::network::constants::Network;
-use bitcoin::network::encodable::{ConsensusDecodable, ConsensusEncodable};
-use bitcoin::network::serialize::BitcoinHash;
+use bitcoin::consensus::{Decodable, Encodable};
 use bitcoin::util::BitArray;
 use bitcoin::util::uint::Uint256;
-use bitcoin::util::hash::Sha256dHash;
-use bitcoin::network::serialize::{SimpleDecoder,SimpleEncoder};
-use bitcoin::network::serialize;
+use bitcoin::util::hash::{BitcoinHash, Sha256dHash};
+use bitcoin::consensus::{Decoder, Encoder};
 use bitcoin;
 use patricia_tree::PatriciaTree;
+use bitcoin::consensus::encode;
 
 
 type BlockTree = PatriciaTree<Uint256, Box<BlockchainNode>>;
@@ -116,9 +115,9 @@ impl BlockchainNode {
     }
 }
 
-impl<S: SimpleEncoder> ConsensusEncodable<S> for BlockchainNode {
+impl<S: Encoder> Encodable<S> for BlockchainNode {
     #[inline]
-    fn consensus_encode(&self, s: &mut S) -> Result<(), serialize::Error> where S: SimpleEncoder {
+    fn consensus_encode(&self, s: &mut S) -> Result<(), encode::Error> where S: Encoder {
         try!(self.block.consensus_encode(s));
         try!(self.total_work.consensus_encode(s));
         try!(self.required_difficulty.consensus_encode(s));
@@ -129,15 +128,15 @@ impl<S: SimpleEncoder> ConsensusEncodable<S> for BlockchainNode {
     }
 }
 
-impl<D: SimpleDecoder> ConsensusDecodable<D> for BlockchainNode {
+impl<D: Decoder> Decodable<D> for BlockchainNode {
     #[inline]
-    fn consensus_decode(d: &mut D) -> Result<BlockchainNode, serialize::Error> where D: SimpleDecoder {
+    fn consensus_decode(d: &mut D) -> Result<BlockchainNode, encode::Error> where D: Decoder {
         Ok(BlockchainNode {
-            block: try!(ConsensusDecodable::consensus_decode(d)),
-            total_work: try!(ConsensusDecodable::consensus_decode(d)),
-            required_difficulty: try!(ConsensusDecodable::consensus_decode(d)),
-            height: try!(ConsensusDecodable::consensus_decode(d)),
-            has_txdata: try!(ConsensusDecodable::consensus_decode(d)),
+            block: try!(Decodable::consensus_decode(d)),
+            total_work: try!(Decodable::consensus_decode(d)),
+            required_difficulty: try!(Decodable::consensus_decode(d)),
+            height: try!(Decodable::consensus_decode(d)),
+            has_txdata: try!(Decodable::consensus_decode(d)),
             prev: ptr::null(),
             next: ptr::null()
         })
@@ -161,9 +160,9 @@ pub struct Blockchain {
 
 unsafe impl Send for Blockchain {}
 
-impl<S: SimpleEncoder> ConsensusEncodable<S> for Blockchain {
+impl<S: Encoder> Encodable<S> for Blockchain {
     #[inline]
-    fn consensus_encode(&self, s: &mut S) -> Result<(), serialize::Error> {
+    fn consensus_encode(&self, s: &mut S) -> Result<(), encode::Error> {
         try!(self.network.consensus_encode(s));
         try!(self.tree.consensus_encode(s));
         try!(self.best_hash.consensus_encode(s));
@@ -172,25 +171,25 @@ impl<S: SimpleEncoder> ConsensusEncodable<S> for Blockchain {
     }
 }
 
-impl<D: SimpleDecoder> ConsensusDecodable<D> for Blockchain {
-    fn consensus_decode(d: &mut D) -> Result<Blockchain, serialize::Error> {
-        let network: Network = try!(ConsensusDecodable::consensus_decode(d));
-        let mut tree: BlockTree = try!(ConsensusDecodable::consensus_decode(d));
-        let best_hash: Sha256dHash = try!(ConsensusDecodable::consensus_decode(d));
-        let genesis_hash: Sha256dHash = try!(ConsensusDecodable::consensus_decode(d));
+impl<D: Decoder> Decodable<D> for Blockchain {
+    fn consensus_decode(d: &mut D) -> Result<Blockchain, encode::Error> {
+        let network: Network = try!(Decodable::consensus_decode(d));
+        let mut tree: BlockTree = try!(Decodable::consensus_decode(d));
+        let best_hash: Sha256dHash = try!(Decodable::consensus_decode(d));
+        let genesis_hash: Sha256dHash = try!(Decodable::consensus_decode(d));
 
         // Lookup best tip
         let best = match tree.lookup(&best_hash.into_le(), 256) {
             Some(node) => &**node as NodePtr,
             None => {
                 // TODO: this is a dirty hack to compile. This entire project will be decomissioned soon
-                return Err(serialize::Error::UnrecognizedNetworkCommand(format!("best tip {:x} not in tree", best_hash)));
+                return Err(encode::Error::UnrecognizedNetworkCommand(format!("best tip {:x} not in tree", best_hash)));
             }
         };
         // Lookup genesis
         if tree.lookup(&genesis_hash.into_le(), 256).is_none() {
             // TODO: this is a dirty hack to compile. This entire project will be decomissioned soon
-            return Err(serialize::Error::UnrecognizedNetworkCommand(format!("genesis {:x} not in tree", genesis_hash)));
+            return Err(encode::Error::UnrecognizedNetworkCommand(format!("genesis {:x} not in tree", genesis_hash)));
         }
         // Reconnect all prev pointers
         let raw_tree = &tree as *const BlockTree;
@@ -215,7 +214,7 @@ impl<D: SimpleDecoder> ConsensusDecodable<D> for Blockchain {
             // Check that "genesis" is the genesis
             if (*scan).bitcoin_hash() != genesis_hash {
                 // TODO: this is a dirty hack to compile. This entire project will be decomissioned soon
-                return Err(serialize::Error::UnrecognizedNetworkCommand(format!("no path from tip {:x} to genesis {:x}",
+                return Err(encode::Error::UnrecognizedNetworkCommand(format!("no path from tip {:x} to genesis {:x}",
                                                                                 best_hash, genesis_hash)));
             }
         }
@@ -644,7 +643,10 @@ mod tests {
     use super::Blockchain;
     use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::network::constants::Network::Bitcoin;
-    use bitcoin::network::serialize::{BitcoinHash, deserialize, serialize};
+    use bitcoin::consensus::serialize;
+    use bitcoin::consensus::deserialize;
+    use bitcoin::BitcoinHash;
+
 
     #[test]
     fn blockchain_serialize_test() {
@@ -653,7 +655,7 @@ mod tests {
                    genesis_block(Bitcoin).header.bitcoin_hash());
 
         let serial = serialize(&empty_chain);
-        let deserial: Result<Blockchain, _> = deserialize(&serial.unwrap());
+        let deserial: Result<Blockchain, _> = deserialize(&serial);
 
         assert!(deserial.is_ok());
         let read_chain = deserial.unwrap();

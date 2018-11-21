@@ -24,10 +24,10 @@ use std::fmt::Debug;
 use std::marker;
 use std::{cmp, fmt, ops, ptr};
 
-use bitcoin::network::encodable::{ConsensusDecodable, ConsensusEncodable};
-use bitcoin::network::serialize::{SimpleDecoder, SimpleEncoder};
+use bitcoin::consensus::{Decodable, Encodable, Encoder, Decoder};
 use bitcoin::util::BitArray;
-use bitcoin::network::serialize;
+use bitcoin::consensus::encode;
+
 
 /// Patricia troo
 pub struct PatriciaTree<K: Copy, V> {
@@ -396,12 +396,12 @@ impl<K: Copy + BitArray, V: Debug> Debug for PatriciaTree<K, V> {
     }
 }
 
-impl<S, K, V> ConsensusEncodable<S> for PatriciaTree<K, V>
-    where S: SimpleEncoder,
-          K: Copy + ConsensusEncodable<S>,
-          V: ConsensusEncodable<S>
+impl<S, K, V> Encodable<S> for PatriciaTree<K, V>
+    where S: Encoder,
+          K: Copy + Encodable<S>,
+          V: Encodable<S>
 {
-    fn consensus_encode(&self, s: &mut S) -> Result<(), serialize::Error> {
+    fn consensus_encode(&self, s: &mut S) -> Result<(), encode::Error> {
         // Depth-first serialization: serialize self, then children
         try!(self.skip_prefix.consensus_encode(s));
         try!(self.skip_len.consensus_encode(s));
@@ -412,18 +412,18 @@ impl<S, K, V> ConsensusEncodable<S> for PatriciaTree<K, V>
     }
 }
 
-impl<D, K, V> ConsensusDecodable<D> for PatriciaTree<K, V>
-    where D: SimpleDecoder,
-          K: Copy + ConsensusDecodable<D>,
-          V: ConsensusDecodable<D>
+impl<D, K, V> Decodable<D> for PatriciaTree<K, V>
+    where D: Decoder,
+          K: Copy + Decodable<D>,
+          V: Decodable<D>
 {
-    fn consensus_decode(d: &mut D) -> Result<PatriciaTree<K, V>, serialize::Error> {
+    fn consensus_decode(d: &mut D) -> Result<PatriciaTree<K, V>, encode::Error> {
         Ok(PatriciaTree {
-            skip_prefix: try!(ConsensusDecodable::consensus_decode(d)),
-            skip_len: try!(ConsensusDecodable::consensus_decode(d)),
-            data: try!(ConsensusDecodable::consensus_decode(d)),
-            child_l: try!(ConsensusDecodable::consensus_decode(d)),
-            child_r: try!(ConsensusDecodable::consensus_decode(d))
+            skip_prefix: try!(Decodable::consensus_decode(d)),
+            skip_len: try!(Decodable::consensus_decode(d)),
+            data: try!(Decodable::consensus_decode(d)),
+            child_l: try!(Decodable::consensus_decode(d)),
+            child_r: try!(Decodable::consensus_decode(d))
         })
     }
 }
@@ -546,11 +546,12 @@ impl<'a, K: Copy, V> Iterator for MutItems<'a, K, V> {
 #[cfg(test)]
 mod tests {
     use super::PatriciaTree;
-    use bitcoin::network::serialize::{deserialize, serialize};
     use bitcoin::util::hash::Sha256dHash;
     use bitcoin::util::uint::Uint128;
     use bitcoin::util::uint::Uint256;
     use bitcoin::util::BitArray;
+    use bitcoin::consensus::serialize;
+    use bitcoin::consensus::deserialize;
 
     #[test]
     fn patricia_single_insert_lookup_delete_test() {
@@ -699,7 +700,7 @@ mod tests {
         }
 
         // Serialize it
-        let serialized = serialize(&tree).unwrap();
+        let serialized = serialize(&tree);
         // Deserialize it
         let deserialized: Result<PatriciaTree<Uint128, u32>, _> = deserialize(&serialized);
         assert!(deserialized.is_ok());
