@@ -1,3 +1,6 @@
+# WARNING: Abadoned work
+This repository is no longer maintained.
+
 # Rust In-Memory Blockchain Library
 
 Library to cache blocks or block headers in-memory. 
